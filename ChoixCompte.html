@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Choix du compte</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.container {
+  background: #fff;
+  padding: 30px 40px;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+/* --- Titre sobre et élégant --- */
+h2 {
+  color: #222;               /* noir profond */
+  font-size: 1.1rem;         /* taille réduite pour un rendu raffiné */
+  margin-bottom: 25px;
+  font-weight: 600;          /* semi-gras pour l’équilibre */
+  letter-spacing: 0.3px;     /* légère aération */
+}
+
+/* --- Liste des comptes --- */
+.user-list a {
+  display: block;
+  margin: 10px 0;
+  padding: 12px;
+  background: #ff7900;
+  color: #fff;
+  text-align: center;
+  text-decoration: none;
+  border-radius: 5px;
+  font-weight: bold;
+  transition: background 0.3s;
+}
+.user-list a:hover {
+  background: #e06a00;
+}
+
+/* --- Loader --- */
+.loader {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #ff7900;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  display: none;
+  margin: 20px auto;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>Sélectionnez le compte à réinitialiser</h2>
+  <div id="userList" class="user-list"></div>
+  <div id="loader" class="loader"></div>
+</div>
+
+<script>
+async function loadUsers() {
+  const token = localStorage.getItem("token");
+  const email = localStorage.getItem("email");
+  const container = document.getElementById("userList");
+  const loader = document.getElementById("loader");
+  loader.style.display = "block";
+
+  if (!token || !email) {
+    console.warn("token ou email manquant -> redirection Login");
+    window.location.href = "Login.html";
+    return;
+  }
+
+  try {
+    console.log("[FRONT] GET /api/user?email=", email);
+    const response = await fetch(`http://localhost:3005/api/user?email=${encodeURIComponent(email)}`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+
+    console.log("[FRONT] /api/user status:", response.status, response.statusText);
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch(e) {
+      console.error("[FRONT] /api/user returned non-JSON:", text);
+      throw new Error("Réponse inattendue du serveur (voir console).");
+    }
+
+    if (!response.ok) {
+      console.error("[FRONT] /api/user erreur:", data);
+      throw new Error(data.error || "Erreur récupération users");
+    }
+
+    container.innerHTML = "";
+    if (!Array.isArray(data.users) || data.users.length === 0) {
+      container.textContent = "Aucun compte trouvé.";
+      return;
+    }
+
+    data.users.forEach(u => {
+      const a = document.createElement("a");
+      a.textContent = u.SignName || u.signName || "Compte";
+      a.href = "#";
+      a.onclick = async (ev) => {
+        ev.preventDefault();
+        loader.style.display = "block";
+        console.log("[FRONT] Click signName:", u);
+        try {
+          console.log("[FRONT] Appel PUT /api/reset-password avec token:", data.token);
+          const resetResp = await fetch("http://localhost:3005/api/reset-password", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${data.token}`
+            },
+            body: JSON.stringify({ userId: u.userId })
+          });
+
+          console.log("[FRONT] /api/reset-password status:", resetResp.status, resetResp.statusText);
+          const resetText = await resetResp.text();
+          let resetData;
+          try { resetData = JSON.parse(resetText); }
+          catch (err) {
+            console.error("[FRONT] reset-password returned non-JSON:", resetText);
+            alert("Réponse inattendue du serveur lors du reset :\n" + resetText);
+            return;
+          }
+
+          if (!resetResp.ok) {
+            console.error("[FRONT] reset-password erreur body:", resetData);
+            throw new Error(resetData.error || JSON.stringify(resetData));
+          }
+
+          localStorage.setItem("userSignName", u.SignName || u.signName);
+          localStorage.setItem("newPassword", resetData.newPassword);
+          localStorage.setItem("tokenNext", resetData.token);
+          window.location.href = "Felicitation.html";
+
+        } catch(err) {
+          console.error("Erreur reset password:", err);
+          alert("Erreur reset password: " + err.message);
+        } finally {
+          loader.style.display = "none";
+        }
+      };
+      container.appendChild(a);
+    });
+
+  } catch(err) {
+    console.error("Erreur récupération users:", err);
+    alert("Erreur lors de la récupération des comptes : " + err.message);
+    window.location.href = "index.html";
+  } finally {
+    loader.style.display = "none";
+  }
+}
+
+loadUsers();
+window.addEventListener("pageshow", (event) => { if (event.persisted) loadUsers(); });
+</script>
+</body>
+</html>

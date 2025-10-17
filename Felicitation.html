@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Félicitations</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.container {
+  background: #fff;
+  padding: 30px 40px;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+h2 {
+  color: #ff7900;
+  margin-bottom: 20px;
+}
+
+.password-box {
+  background: #f0f0f0;
+  padding: 15px;
+  border-radius: 8px;
+  margin: 15px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+}
+
+.icon-btn svg {
+  fill: #ff7900;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.2s;
+}
+
+.icon-btn:hover svg {
+  transform: scale(1.1);
+}
+
+.home-btn {
+  width: 100%;
+  background: #ff7900;
+  color: #fff;
+  border: none;
+  padding: 12px;
+  border-radius: 5px;
+  font-weight: bold;
+  margin-top: 15px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.home-btn:hover {
+  background: #e06a00;
+}
+
+.copied-msg {
+  color: green;
+  font-size: 0.9em;
+  margin-left: 5px;
+  display: none;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>Félicitations !</h2>
+  <p>Votre mot de passe a été réinitialisé pour :</p>
+  <p id="userSignName" style="font-weight:bold;"></p>
+
+  <div class="password-box">
+    <span id="newPassword"></span>
+    <div style="display:flex; align-items:center; gap:5px;">
+      <!-- Afficher / Masquer mot de passe -->
+      <button class="icon-btn" id="togglePwd">
+        <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M12 5c-7 0-11 7-11 7s4 7 11 7 11-7 11-7-4-7-11-7zm0 12c-2.76 0-5-2.24-5-5s2.24-5 5-5
+                   5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 
+                   3-1.34 3-3-1.34-3-3-3z"/>
+        </svg>
+      </button>
+
+      <!-- Copier mot de passe -->
+      <button class="icon-btn" id="copyPwd">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 
+                   1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+        </svg>
+      </button>
+      <span class="copied-msg" id="copiedMsg">Copié !</span>
+    </div>
+  </div>
+
+  <button class="home-btn" onclick="goHome()">Accueil</button>
+</div>
+
+<script>
+// Récupération des infos
+const tokenNext = localStorage.getItem("tokenNext");
+const userSignName = localStorage.getItem("userSignName");
+const newPassword = localStorage.getItem("newPassword");
+
+if (!tokenNext || !userSignName || !newPassword) {
+  window.location.href = "Login.html";
+}
+
+document.getElementById("userSignName").textContent = userSignName;
+const pwdSpan = document.getElementById("newPassword");
+
+// --- Mot de passe masqué par défaut ---
+pwdSpan.textContent = "*".repeat(newPassword.length);
+let hidden = true;
+
+// --- Afficher / Masquer mot de passe ---
+const toggleBtn = document.getElementById("togglePwd");
+toggleBtn.addEventListener("click", () => {
+  if (hidden) {
+    pwdSpan.textContent = newPassword;
+    hidden = false;
+  } else {
+    pwdSpan.textContent = "*".repeat(newPassword.length);
+    hidden = true;
+  }
+});
+
+// --- Copier mot de passe ---
+const copyBtn = document.getElementById("copyPwd");
+const copiedMsg = document.getElementById("copiedMsg");
+copyBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(newPassword)
+    .then(() => {
+      copiedMsg.style.display = "inline";
+      setTimeout(() => { copiedMsg.style.display = "none"; }, 1500);
+    });
+});
+
+// --- Bouton Accueil ---
+function goHome() {
+  clearSensitiveData();
+  window.location.href = "index.html";
+}
+
+// --- Timer d'inactivité 30s ---
+let inactivityTimer = setTimeout(() => {
+  clearSensitiveData();
+  window.location.href = "index.html";
+}, 300000); // 3MIN 
+
+// --- Réinitialiser le timer sur interaction ---
+['mousemove','keydown','click','touchstart'].forEach(evt => {
+  window.addEventListener(evt, () => {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => {
+      clearSensitiveData();
+      window.location.href = "index.html";
+    }, 40000);
+  });
+});
+
+// --- Sécurité navigation / actualisation ---
+window.history.pushState(null, null, window.location.href);
+window.onpopstate = function() {
+  clearSensitiveData();
+  window.location.href = "index.html";
+};
+window.onbeforeunload = clearSensitiveData;
+window.addEventListener("pageshow", function(event) {
+  if (event.persisted) {
+    clearSensitiveData();
+    window.location.href = "index.html";
+  }
+});
+
+// --- Nettoyage localStorage ---
+function clearSensitiveData() {
+  localStorage.removeItem("tokenNext");
+  localStorage.removeItem("userSignName");
+  localStorage.removeItem("newPassword");
+}
+</script>
+</body>
+</html>

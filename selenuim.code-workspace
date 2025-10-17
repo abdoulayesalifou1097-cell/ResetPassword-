@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../selenuim"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "projetTemp"
+	}
+}

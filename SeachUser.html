@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orange Bank - Gestion Utilisateur</title>
+  <link rel="stylesheet" href="Css/resetPassword.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- PARTIE RECHERCHE -->
+    <div id="searchSection" class="section active">
+      <h2>Recherche de l'utilisateur</h2>
+      <form id="api-form">
+        <div class="form-group">
+          <label for="login">Login T24 :</label>
+          <input type="text" id="login" placeholder="Entrez le login" required>
+        </div>
+        <button type="submit" class="btn">Rechercher</button>
+      </form>
+      <pre id="result">Résultat affiché ici...</pre>
+    </div>
+
+    <!-- PARTIE FORMULAIRES -->
+    <div id="formsSection" class="section">
+      <div class="toggle-buttons">
+        <button id="btn-reset" class="toggle-btn active" onclick="toggleForm('resetForm', this)">Réinitialiser Mot de Passe</button>
+        <button id="btn-account" class="toggle-btn" onclick="toggleForm('accountForm', this)">Activer/Désactiver Compte</button>
+      </div>
+
+      <!-- Formulaire Réinitialisation -->
+      <div id="resetForm" class="form-container active">
+        <h2>Réinitialisation du mot de passe</h2>
+        <form id="reset-password-form">
+          <div class="form-group">
+            <label for="reset-login">Login T24</label>
+            <input type="text" id="reset-login" readonly>
+          </div>
+          <div class="form-group">
+            <label for="new-password">Nouveau mot de passe</label>
+            <input type="password" id="new-password" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn">Réinitialiser</button>
+        </form>
+      </div>
+
+      <!-- Formulaire Activation/Désactivation -->
+      <div id="accountForm" class="form-container">
+        <h2>Activation / Désactivation du Compte</h2>
+        <form>
+          <div class="form-group">
+            <label for="account-login">Login T24</label>
+            <input type="text" id="account-login" placeholder="Entrez votre identifiant T24" required>
+          </div>
+          <div class="form-group">
+            <label for="account-password">Mot de passe</label>
+            <input type="password" id="account-password" placeholder="••••••••" required>
+          </div>
+          <div class="form-group">
+            <label for="disable-duration">Durée de désactivation (en jours)</label>
+            <input type="number" id="disable-duration" placeholder="Ex: 7" min="1" step="1" pattern="[0-9]*" required>
+          </div>
+          <button type="submit" class="btn">Activer</button>
+          <button type="submit" class="btn btn-danger">Désactiver</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+  // === Recherche de l'utilisateur ===
+  document.getElementById("api-form").addEventListener("submit", async function(e) {
+    e.preventDefault();
+    const login = document.getElementById("login").value;
+    const resultBox = document.getElementById("result");
+    resultBox.textContent = "Chargement...";
+
+    try {
+      const url = `http://localhost:3005/api/user?login=${encodeURIComponent(login)}`;
+      const response = await fetch(url);
+
+      if (response.ok) {
+        const text = await response.text();
+
+        if (text.includes("L'id du user retrouvé :")) {
+          const userId = text.split(":")[1].trim();
+
+          // Pré-remplir le formulaire
+          document.getElementById("reset-login").value = userId;
+
+          // Masquer la section recherche
+          const searchSection = document.getElementById("searchSection");
+          searchSection.classList.remove("active");
+          searchSection.style.display = "none";
+
+          // Afficher la section formulaire
+          const formsSection = document.getElementById("formsSection");
+          formsSection.style.display = "flex";
+          formsSection.classList.add("active");
+
+          resultBox.textContent = `Utilisateur trouvé : ${userId}`;
+        } else {
+          resultBox.textContent = text;
+        }
+      } else {
+        const error = await response.text();
+        resultBox.textContent = "Erreur API : " + error;
+      }
+
+    } catch (err) {
+      resultBox.textContent = "Erreur réseau : " + err.message;
+    }
+  });
+
+  // === Basculer entre les formulaires ===
+  function toggleForm(formId, btn) {
+    document.querySelectorAll('.form-container').forEach(f => f.classList.remove('active'));
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(formId).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  // === Soumission du formulaire reset password ===
+  document.getElementById("reset-password-form").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const userId = document.getElementById("reset-login").value;
+    const newPassword = document.getElementById("new-password").value;
+
+    if (!userId || !newPassword) {
+      alert("Veuillez remplir tous les champs !");
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:3005/api/passwordreset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ userId, newPassword })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert(` Réinitialisation réussie\nID: ${data.id}\nStatus: ${data.status}`);
+      } else {
+        alert(` Erreur API: ${data.error}`);
+      }
+
+    } catch (err) {
+      alert("Erreur réseau: " + err.message);
+    }
+  });
+</script>
+
+</body>
+</html>
