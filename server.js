@@ -2,35 +2,32 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch'); // npm install node-fetch@2
+const crypto = require('crypto');
 
 const app = express();
-const PORT = 3005;
-
-// === ⚠️ Secrets (mettre en env variables en prod) ===
-const SECRET_KEY = process.env.SECRET_KEY || "maCleSecreteJWT";
-const T24_USER = process.env.T24_USER || "GTSUSER";
-const T24_PASS = process.env.T24_PASS || "1234567";
-
-// === URL Ngrok local API ===
-const NGROK_API = "http://127.0.0.1:4040/api/tunnels";
+const PORT = process.env.PORT || 3005;
+const SECRET_KEY = process.env.SECRET_KEY || "maCleSecreteJWT"; // ⚠️ mettre en variable d'env en prod
+const T24_BASE_URL = process.env.T24_BASE_URL || "http://localhost:8085"; // URL publique ngrok ou localhost
 
 app.use(express.json());
 app.use(cors({
-  origin: "http://localhost:59222",
+  origin: process.env.FRONT_URL || "http://localhost:59222",
   methods: ["GET","POST","PUT","DELETE","OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// === Base simulée login ===
+// === Base simulée minimale pour login ===
 const localCredentials = [
   { email: "msalifou@orangebank.ci", password: "1234567" },
   { email: "martial.ehui@orangebank.ci", password: "1234567" } 
 ];
 
+// === Stockage des tokens actifs ===
 const activeTokens = new Set();
 
 // === LOGIN ===
 app.post('/api/login', (req, res) => {
+  console.log("[LOGIN] Requête login reçue:", req.body);
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "email et password requis" });
 
@@ -39,59 +36,51 @@ app.post('/api/login', (req, res) => {
 
   const token = jwt.sign({ email }, SECRET_KEY, { expiresIn: "5m" });
   activeTokens.add(token);
+  console.log("[LOGIN] Token généré:", token);
 
   res.json({ login: cred.email, email: cred.email, token });
 });
 
-// === Middleware token ===
+// === Middleware pour vérifier et consommer le token ===
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'];
   const token = auth?.split(' ')[1];
+
+  console.log("[VERIFY TOKEN] Token reçu:", token);
 
   if (!token) return res.status(403).json({ error: "Token manquant" });
   if (!activeTokens.has(token)) return res.status(401).json({ error: "Token invalide ou expiré" });
 
   try {
     req.user = jwt.verify(token, SECRET_KEY);
-    activeTokens.delete(token);
+    activeTokens.delete(token); // token consommé
+    console.log("[VERIFY TOKEN] Token valide pour:", req.user.email);
     next();
   } catch (err) {
+    console.error("[VERIFY TOKEN] Erreur:", err.message);
     return res.status(401).json({ error: "Token invalide ou expiré" });
   }
 }
 
-// === Attendre que Ngrok soit prêt avant d'utiliser l'URL ===
-async function getNgrokUrl(retries = 10, delay = 1000) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const resp = await fetch(NGROK_API);
-      const data = await resp.json();
-      const httpTunnel = data.tunnels.find(t => t.public_url.startsWith("http"));
-      if (httpTunnel) return httpTunnel.public_url;
-    } catch (err) {
-      // Ngrok pas encore prêt
-    }
-    await new Promise(r => setTimeout(r, delay));
-  }
-  throw new Error("Ngrok non trouvé après plusieurs tentatives");
-}
-
-// === Appel API T24 ===
+// === Helper pour appeler l'API T24 réelle (GET comptes) ===
 async function fetchAccountsFromT24(email) {
   try {
-    const ngrokUrl = await getNgrokUrl();
-    const url = `${ngrokUrl}/OBAMobApi/api/v1.0.0/party/user/userId/${T24_USER}?Email=${encodeURIComponent(email)}`;
+    const userId = "GTSUSER";
+    const password = "1234567";
+    const url = `${T24_BASE_URL}/OBAMobApi/api/v1.0.0/party/user/userId/${userId}?Email=${encodeURIComponent(email)}`;
     console.log("[FETCH T24] URL:", url);
 
     const resp = await fetch(url, {
       method: "GET",
       headers: {
         "Accept": "application/json",
-        "Authorization": "Basic " + Buffer.from(`${T24_USER}:${T24_PASS}`).toString("base64")
+        "Authorization": "Basic " + Buffer.from(`${userId}:${password}`).toString("base64")
       }
     });
 
     const text = await resp.text();
+    console.log("[FETCH T24] Réponse brute:", text);
+
     if (!resp.ok) throw new Error(`Erreur API T24 ${resp.status}: ${text}`);
     const data = JSON.parse(text);
     return data.body || [];
@@ -101,55 +90,71 @@ async function fetchAccountsFromT24(email) {
   }
 }
 
-// === API comptes ===
+// === API pour récupérer comptes (page ChoixCompte) ===
 app.get('/api/user', verifyToken, async (req, res) => {
   const email = req.query.email;
+  console.log("[API USER] Requête pour email:", email);
+
   if (!email) return res.status(400).json({ error: "email requis" });
 
   try {
     const users = await fetchAccountsFromT24(email);
+    console.log("[API USER] Comptes reçus:", users);
+
     const newToken = jwt.sign({ email }, SECRET_KEY, { expiresIn: "5m" });
     activeTokens.add(newToken);
+
     res.json({ users, token: newToken });
   } catch (err) {
+    console.error("[API USER] Erreur récupération comptes:", err.message);
     res.status(500).json({ error: "Erreur récupération comptes T24" });
   }
 });
 
-// === Reset password ===
+// === API pour réinitialiser mot de passe T24 ===
 app.put('/api/reset-password', verifyToken, async (req, res) => {
-  const { userId } = req.body;
-  if (!userId) return res.status(400).json({ error: "userId requis" });
-
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let newPassword = '';
-  while (newPassword.length < 8) {
-    const randChar = chars.charAt(Math.floor(Math.random() * chars.length));
-    if (newPassword.length === 0 || randChar !== newPassword[newPassword.length - 1]) {
-      newPassword += randChar;
-    }
-  }
-
   try {
-    const ngrokUrl = await getNgrokUrl();
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId requis" });
+
+    // Génération mot de passe aléatoire 8 caractères sans répétition consécutive
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let newPassword = '';
+    while (newPassword.length < 8) {
+      const randChar = chars.charAt(Math.floor(Math.random() * chars.length));
+      if (newPassword.length === 0 || randChar !== newPassword[newPassword.length - 1]) {
+        newPassword += randChar;
+      }
+    }
+
+    // Création du timestamp dynamique
     const timestamp = Date.now();
-    const t24Url = `${ngrokUrl}/OBAMobApi/api/v1.0.0/party/user/passwordreset/${timestamp}`;
-    const t24Payload = { body: { userlogin: userId, userPassword: newPassword } };
+    const t24Url = `${T24_BASE_URL}/OBAMobApi/api/v1.0.0/party/user/passwordreset/${timestamp}`;
+    const t24Payload = { 
+      body: { 
+        userlogin: userId, 
+        userPassword: newPassword 
+      } 
+    };
+
+    console.log("[RESET PASSWORD] Appel T24:", t24Url, "userId:", userId, "nouveau mdp:", newPassword);
 
     const resp = await fetch(t24Url, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Basic " + Buffer.from(`${T24_USER}:${T24_PASS}`).toString("base64")
+        "Authorization": "Basic " + Buffer.from("GTSUSER:1234567").toString("base64")
       },
       body: JSON.stringify(t24Payload)
     });
 
     const data = await resp.json();
+    console.log("[RESET PASSWORD] Réponse T24:", data);
+
     if (!resp.ok) throw new Error(data.error || "Erreur réinitialisation T24");
 
     res.json({
-      message: `Mot de passe réinitialisé pour ${userId}`,
+      message: `Félicitations, mot de passe réinitialisé avec succès pour ${userId}`,
       newPassword,
       t24Response: data,
       token: jwt.sign({ userId }, SECRET_KEY, { expiresIn: "5m" })
@@ -161,12 +166,11 @@ app.put('/api/reset-password', verifyToken, async (req, res) => {
   }
 });
 
-// === Route protégée ===
+// === Exemple route protégée page suivante ===
 app.get('/api/nextpage', verifyToken, (req, res) => {
   const newToken = jwt.sign({ email: req.user.email }, SECRET_KEY, { expiresIn: "5m" });
   activeTokens.add(newToken);
   res.json({ token: newToken, info: "Page suivante accessible" });
 });
 
-// === Lancement serveur ===
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
