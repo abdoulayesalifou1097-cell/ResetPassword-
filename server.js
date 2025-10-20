@@ -11,7 +11,7 @@ const SECRET_KEY = process.env.SECRET_KEY || "maCleSecreteJWT";
 const T24_USER = process.env.T24_USER || "GTSUSER";
 const T24_PASS = process.env.T24_PASS || "1234567";
 
-// === URL de l'API Ngrok locale (Ngrok doit être lancé avant Node) ===
+// === URL Ngrok local API ===
 const NGROK_API = "http://127.0.0.1:4040/api/tunnels";
 
 app.use(express.json());
@@ -21,13 +21,12 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// === Base simulée pour login ===
+// === Base simulée login ===
 const localCredentials = [
   { email: "msalifou@orangebank.ci", password: "1234567" },
   { email: "martial.ehui@orangebank.ci", password: "1234567" } 
 ];
 
-// === Stockage tokens actifs ===
 const activeTokens = new Set();
 
 // === LOGIN ===
@@ -44,7 +43,7 @@ app.post('/api/login', (req, res) => {
   res.json({ login: cred.email, email: cred.email, token });
 });
 
-// === Middleware vérification token ===
+// === Middleware token ===
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'];
   const token = auth?.split(' ')[1];
@@ -54,42 +53,41 @@ function verifyToken(req, res, next) {
 
   try {
     req.user = jwt.verify(token, SECRET_KEY);
-    activeTokens.delete(token); // token consommé
+    activeTokens.delete(token);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Token invalide ou expiré" });
   }
 }
 
-// === Helper pour récupérer l'URL publique Ngrok automatiquement ===
-async function getNgrokUrl() {
-  try {
-    const resp = await fetch(NGROK_API);
-    const data = await resp.json();
-    const httpTunnel = data.tunnels.find(t => t.public_url.startsWith("http"));
-    if (!httpTunnel) throw new Error("Aucun tunnel HTTP trouvé");
-    return httpTunnel.public_url;
-  } catch (err) {
-    console.error("[NGROK] Impossible de récupérer l'URL:", err.message);
-    return null;
+// === Attendre que Ngrok soit prêt avant d'utiliser l'URL ===
+async function getNgrokUrl(retries = 10, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const resp = await fetch(NGROK_API);
+      const data = await resp.json();
+      const httpTunnel = data.tunnels.find(t => t.public_url.startsWith("http"));
+      if (httpTunnel) return httpTunnel.public_url;
+    } catch (err) {
+      // Ngrok pas encore prêt
+    }
+    await new Promise(r => setTimeout(r, delay));
   }
+  throw new Error("Ngrok non trouvé après plusieurs tentatives");
 }
 
-// === Helper pour appeler l'API T24 (GET comptes) ===
+// === Appel API T24 ===
 async function fetchAccountsFromT24(email) {
   try {
-    const userId = T24_USER;
     const ngrokUrl = await getNgrokUrl();
-    if (!ngrokUrl) throw new Error("Ngrok non trouvé");
-
-    const url = `${ngrokUrl}/OBAMobApi/api/v1.0.0/party/user/userId/${userId}?Email=${encodeURIComponent(email)}`;
+    const url = `${ngrokUrl}/OBAMobApi/api/v1.0.0/party/user/userId/${T24_USER}?Email=${encodeURIComponent(email)}`;
     console.log("[FETCH T24] URL:", url);
 
     const resp = await fetch(url, {
       method: "GET",
       headers: {
         "Accept": "application/json",
-        "Authorization": "Basic " + Buffer.from(`${userId}:${T24_PASS}`).toString("base64")
+        "Authorization": "Basic " + Buffer.from(`${T24_USER}:${T24_PASS}`).toString("base64")
       }
     });
 
@@ -103,7 +101,7 @@ async function fetchAccountsFromT24(email) {
   }
 }
 
-// === API récupération comptes ===
+// === API comptes ===
 app.get('/api/user', verifyToken, async (req, res) => {
   const email = req.query.email;
   if (!email) return res.status(400).json({ error: "email requis" });
@@ -118,7 +116,7 @@ app.get('/api/user', verifyToken, async (req, res) => {
   }
 });
 
-// === API reset password ===
+// === Reset password ===
 app.put('/api/reset-password', verifyToken, async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: "userId requis" });
@@ -134,8 +132,6 @@ app.put('/api/reset-password', verifyToken, async (req, res) => {
 
   try {
     const ngrokUrl = await getNgrokUrl();
-    if (!ngrokUrl) throw new Error("Ngrok non trouvé");
-
     const timestamp = Date.now();
     const t24Url = `${ngrokUrl}/OBAMobApi/api/v1.0.0/party/user/passwordreset/${timestamp}`;
     const t24Payload = { body: { userlogin: userId, userPassword: newPassword } };
@@ -165,11 +161,12 @@ app.put('/api/reset-password', verifyToken, async (req, res) => {
   }
 });
 
-// === Route exemple protégée ===
+// === Route protégée ===
 app.get('/api/nextpage', verifyToken, (req, res) => {
   const newToken = jwt.sign({ email: req.user.email }, SECRET_KEY, { expiresIn: "5m" });
   activeTokens.add(newToken);
   res.json({ token: newToken, info: "Page suivante accessible" });
 });
 
+// === Lancement serveur ===
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
